@@ -2,7 +2,7 @@ import cv2
 import pytesseract
 
 # Configurar el reconocimiento de caracteres
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files (x86)\Tesseract-OCR\tesseract' # Reemplace la ruta con la ubicación de Tesseract en su sistema
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract' # Reemplace la ruta con la ubicación de Tesseract en su sistema
 
 # Inicializar la cámara
 cap = cv2.VideoCapture(0)
@@ -42,9 +42,11 @@ while True:
 
         # Aplicar OCR para extraer el número de placa
         plate_number = pytesseract.image_to_string(plate_img, lang='eng', config='--psm 11')
-        print("PLACA: " + plate_number)
+        if len(plate_number) == 8:
+            print("PLACA: " + plate_number)
+        # print("PLACA: " + plate_number)
 
-        # Dibujar un rectángulo alrededor de la placa del vehículo
+# Dibujar un rectángulo alrededor de la placa del vehículo
         cv2.drawContours(frame, [plate_contour], -1, (0, 255, 0), 2)
 
         # Escribir el número de placa en la imagen
