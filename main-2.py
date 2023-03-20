@@ -53,7 +53,7 @@ while True:
         cv2.putText(frame, plate_number, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
     # Mostrar la imagen en una ventana
-    cv2.imshow('Placa de vehículo', frame)
+    cv2.imshow('Placa de vehiculo', frame)
 
     # Salir si se presiona la tecla 'q'
     if cv2.waitKey(1) & 0xFF == ord('q'):
