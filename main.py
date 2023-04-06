@@ -1,51 +1,67 @@
 import cv2
-import numpy as np
 import pytesseract
 
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files (x86)\Tesseract-OCR\tesseract'
+# Configurar el reconocimiento de caracteres
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files (x86)\Tesseract-OCR\tesseract' # Reemplace la ruta con la ubicación de Tesseract en su sistema
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract' # Reemplace la ruta con la ubicación de Tesseract en su sistema
 
-# Iniciar la cámara
+# Inicializar la cámara
 cap = cv2.VideoCapture(0)
 
 while True:
-    # Capturar un frame
+    # Capturar un fotograma de la cámara
     ret, frame = cap.read()
 
-    # Convertir a escala de grises y aplicar un filtro Gaussiano
-    gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (5,5), 0)
+    # Convertir el fotograma a escala de grises
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    # Detección de bordes y contornos
-    edges = cv2.Canny(gray, 50, 150)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Aplicar filtro gaussiano para reducir el ruido
+    # gray = cv2.GaussianBlur(gray, (5, 5), 0) # antiguo
+    gray = cv2.GaussianBlur(gray, (7, 7), 0)
 
-    # Seleccionar contornos relevantes y dibujar un rectángulo alrededor de la placa de vehículo
+    # Detectar los bordes de la placa del vehículo
+    # edged = cv2.Canny(gray, 50, 200) # antiguo
+    edged = cv2.Canny(gray, 75, 250)
+
+    # Buscar contornos en la imagen
+    contours, hierarchy = cv2.findContours(edged, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Ordenar los contornos por área descendente
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:10]
+
+    # Buscar la placa del vehículo entre los contornos
+    plate_contour = None
     for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > 30:
-            (x, y, w, h) = cv2.boundingRect(contour)
-            aspect_ratio = float(w) / h
-            if 0.3 < aspect_ratio < 1.5:
-                # Extraer la placa de la imagen original
-                plate = cv2.resize(frame[y:y+h, x:x+w], (400, 100))
+        perimeter = cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+        if len(approx) == 4:
+            plate_contour = approx
+            break
 
-                # Utilizar técnicas de procesamiento de imágenes para mejorar la visibilidad de la placa
-                plate_gray = cv2.cvtColor(plate, cv2.COLOR_BGR2GRAY)
-                _, plate_binary = cv2.threshold(plate_gray, 128, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+    if plate_contour is not None:
+        # Recortar la imagen de la placa del vehículo
+        x, y, w, h = cv2.boundingRect(plate_contour)
+        plate_img = frame[y:y+h, x:x+w]
 
-                # Utilizar OCR para detectar y leer el texto en la placa
-                text = pytesseract.image_to_string(plate_binary, lang="eng", config="--psm 7")
+        # Aplicar OCR para extraer el número de placa
+        plate_number = pytesseract.image_to_string(plate_img, lang='eng', config='--psm 11')
+        if len(plate_number) == 8:
+            print("PLACA: " + plate_number)
+        # print("PLACA: " + plate_number)
 
-                # Verificar que el texto detectado es un número de matrícula válido
-                if text.isalnum() and len(text) >= 6:
-                    print("Plate Number:", text)
+# Dibujar un rectángulo alrededor de la placa del vehículo
+        cv2.drawContours(frame, [plate_contour], -1, (0, 255, 0), 2)
 
-    # Mostrar el resultado
-    cv2.imshow("Plate Detection", frame)
+        # Escribir el número de placa en la imagen
+        cv2.putText(frame, plate_number, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    # Salir del bucle si se presiona 'q'
+    # Mostrar la imagen en una ventana
+    cv2.imshow('Placa de vehiculo', frame)
+
+    # Salir si se presiona la tecla 'q'
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Cerrar la cámara y todas las ventanas
+# Liberar los recursos y cerrar la ventana
 cap.release()
 cv2.destroyAllWindows()
