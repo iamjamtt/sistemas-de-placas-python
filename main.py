@@ -17,15 +17,23 @@ if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = os.getenv("TESSERACT_PATH")
 
 # Conexión a base de datos
-mydb = mysql.connector.connect(
-    host=os.getenv("DB_HOST"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASS"),
-    database=os.getenv("DB_NAME")
-)
-mycursor = mydb.cursor()
+try:
+    mydb = mysql.connector.connect(
+        host=os.getenv("DB_HOST"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASS"),
+        database=os.getenv("DB_NAME")
+    )
+    mycursor = mydb.cursor()
+except mysql.connector.Error as err:
+    print(f"❌ Error al conectar a la base de datos: {err}")
+    exit(1)
 
 cap = cv2.VideoCapture(1)
+if not cap.isOpened():
+    print("❌ No se pudo abrir la cámara.")
+    exit(1)
+
 print("🔍 Iniciando detector de placas peruanas. Presiona 'q' para salir.")
 
 while True:
