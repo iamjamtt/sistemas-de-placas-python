@@ -1,0 +1,6 @@
+opencv-python
+pytesseract
+imutils
+mysql-connector-python
+python-dotenv
+numpy
