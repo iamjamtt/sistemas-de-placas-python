@@ -8,6 +8,7 @@ import os
 from PIL import Image
 from dotenv import load_dotenv
 import platform
+import time
 
 # Cargar variables de entorno
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -37,6 +38,8 @@ class PlateDetector:
             raise IOError("❌ No se pudo abrir la cámara.")
         print("🔍 Iniciando detector de placas peruanas. Presiona 'q' para salir.")
         self.Ctexto = ''
+        self.mensaje = ''
+        self.tiempo_mensaje = 0
 
     def preprocess(self, frame):
         al, an, _ = frame.shape
@@ -66,7 +69,6 @@ class PlateDetector:
         raw_text = pytesseract.image_to_string(pil_img, config=config)
 
         cleaned = re.sub(r'[^A-Z0-9]', '', raw_text.upper())
-        # cleaned = cleaned.replace('O', '0').replace('I', '1')
         return cleaned
 
     def save_plate_and_log(self, plate, plate_img):
@@ -88,13 +90,18 @@ class PlateDetector:
                 mycursor.execute(sql_out, (now, now, result2[0]))
                 mydb.commit()
                 print("⏺️ Salida registrada.")
+                self.mensaje = f"Placa {plate} registrada (salida)"
             else:
                 sql_in = "INSERT INTO controls (id_vehicle, ingreso, fecha, created_at, updated_at) VALUES (%s, %s, %s, %s, %s)"
                 mycursor.execute(sql_in, (id_vehicle, now, today, now, now))
                 mydb.commit()
                 print("✅ Ingreso registrado.")
+                self.mensaje = f"Placa {plate} registrada (ingreso)"
         else:
             print("❌ La placa no está registrada en la base de datos.")
+            self.mensaje = f"Placa {plate} no registrada"
+
+        self.tiempo_mensaje = time.time()
 
         os.makedirs("placas_detectadas", exist_ok=True)
         filename = f"placas_detectadas/{plate}_{datetime.now().strftime('%H%M%S')}.png"
@@ -132,7 +139,13 @@ class PlateDetector:
 
             # Mostrar texto
             cv2.rectangle(frame, (870, 750), (1070, 850), (0, 0, 0), cv2.FILLED)
-            cv2.putText(frame, self.Ctexto, (900, 810), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(frame, self.Ctexto, (880, 790), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
+            # Mostrar mensaje por 5 segundos
+            if self.mensaje and (time.time() - self.tiempo_mensaje < 5):
+                cv2.rectangle(frame, (40, 20), (750, 60), (0, 0, 0), cv2.FILLED)
+                cv2.putText(frame, self.mensaje, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
             cv2.imshow("Vehiculos", frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
