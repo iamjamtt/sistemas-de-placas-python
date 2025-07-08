@@ -4,3 +4,4 @@
 *.xml
 placas_detectadas
 .env
+test.py
