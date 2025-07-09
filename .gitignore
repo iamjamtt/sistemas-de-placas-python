@@ -1,5 +1,5 @@
 *.xml
-placas_detectadas
+files
 .env
 test.py
 .idea/misc.xml
