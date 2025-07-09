@@ -3,7 +3,7 @@ import pytesseract
 import numpy as np
 import mysql.connector
 import re
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import os
 from PIL import Image
 from dotenv import load_dotenv
@@ -32,14 +32,20 @@ except mysql.connector.Error as err:
     exit(1)
 
 class PlateDetector:
-    def __init__(self, cam_index=1):
-        self.cap = cv2.VideoCapture(cam_index)
-        if not self.cap.isOpened():
-            raise IOError("❌ No se pudo abrir la cámara.")
-        print("🔍 Iniciando detector de placas peruanas. Presiona 'q' para salir.")
+    def __init__(self, cam_index_main=1, cam_index_secondary=2):
+        self.cap_main = cv2.VideoCapture(cam_index_main)
+        self.cap_secondary = cv2.VideoCapture(cam_index_secondary)
+        if not self.cap_main.isOpened():
+            raise IOError("❌ No se pudo abrir la cámara principal.")
+        if not self.cap_secondary.isOpened():
+            raise IOError("❌ No se pudo abrir la cámara secundaria.")
+
+        print("🔍 Iniciando detector de placas peruanas con dos cámaras. Presiona 'q' para salir.")
         self.Ctexto = ''
         self.mensaje = ''
         self.tiempo_mensaje = 0
+        self.ultima_captura_main = None
+        self.ultima_captura_secondary = None
 
     def preprocess(self, frame):
         al, an, _ = frame.shape
@@ -71,50 +77,82 @@ class PlateDetector:
         cleaned = re.sub(r'[^A-Z0-9]', '', raw_text.upper())
         return cleaned
 
-    def save_plate_and_log(self, plate, plate_img):
+    def save_plate_and_log(self, plate):
         sql = "SELECT id FROM vehicles WHERE placa = %s"
         mycursor.execute(sql, (plate,))
         result = mycursor.fetchone()
+
+        carpeta_destino = "placas_no_detectadas_bd"
 
         if result:
             id_vehicle = result[0]
             now = datetime.now()
             today = date.today().strftime('%Y-%m-%d')
+            two_minutes_ago = now - timedelta(minutes=2)
 
-            sql2 = "SELECT id, salida FROM controls WHERE id_vehicle = %s AND fecha = %s ORDER BY id DESC LIMIT 1"
+            sql2 = "SELECT id, ingreso, salida FROM controls WHERE id_vehicle = %s AND fecha = %s ORDER BY id DESC LIMIT 1"
             mycursor.execute(sql2, (id_vehicle, today))
             result2 = mycursor.fetchone()
 
-            if result2 and result2[1] is None:
-                sql_out = "UPDATE controls SET salida = %s, updated_at = %s WHERE id = %s"
-                mycursor.execute(sql_out, (now, now, result2[0]))
-                mydb.commit()
-                print("⏺️ Salida registrada.")
-                self.mensaje = f"Placa {plate} registrada (salida)"
+            if result2:
+                control_id, ingreso_time, salida_time = result2
+                if salida_time is None:
+                    # Último registro es ingreso
+                    if ingreso_time and ingreso_time >= two_minutes_ago:
+                        print("⚠️ Detección ignorada (repetido después de ingreso reciente).")
+                        return
+                    sql_out = "UPDATE controls SET salida = %s, updated_at = %s WHERE id = %s"
+                    mycursor.execute(sql_out, (now, now, control_id))
+                    mydb.commit()
+                    print("⏺️ Salida registrada.")
+                    self.mensaje = f"Placa {plate} registrada (salida)"
+                    carpeta_destino = "placas_detectadas_salida"
+                else:
+                    # Último registro fue salida
+                    if salida_time and salida_time >= two_minutes_ago:
+                        print("⚠️ Detección ignorada (repetido después de salida reciente).")
+                        return
+                    sql_in = "INSERT INTO controls (id_vehicle, ingreso, fecha, created_at, updated_at) VALUES (%s, %s, %s, %s, %s)"
+                    mycursor.execute(sql_in, (id_vehicle, now, today, now, now))
+                    mydb.commit()
+                    print("✅ Ingreso registrado.")
+                    self.mensaje = f"Placa {plate} registrada (ingreso)"
+                    carpeta_destino = "placas_detectadas_ingreso"
             else:
                 sql_in = "INSERT INTO controls (id_vehicle, ingreso, fecha, created_at, updated_at) VALUES (%s, %s, %s, %s, %s)"
                 mycursor.execute(sql_in, (id_vehicle, now, today, now, now))
                 mydb.commit()
                 print("✅ Ingreso registrado.")
                 self.mensaje = f"Placa {plate} registrada (ingreso)"
+                carpeta_destino = "placas_detectadas_ingreso"
         else:
             print("❌ La placa no está registrada en la base de datos.")
             self.mensaje = f"Placa {plate} no registrada"
 
         self.tiempo_mensaje = time.time()
 
-        os.makedirs("placas_detectadas", exist_ok=True)
-        filename = f"placas_detectadas/{plate}_{datetime.now().strftime('%H%M%S')}.png"
-        cv2.imwrite(filename, plate_img)
+        os.makedirs(carpeta_destino, exist_ok=True)
+        os.makedirs(f"{carpeta_destino}_cam2", exist_ok=True)
+        nombre_archivo = f"{plate}_{datetime.now().strftime('%H%M%S')}.png"
+
+        if self.ultima_captura_main is not None:
+            cv2.imwrite(os.path.join(carpeta_destino, nombre_archivo), self.ultima_captura_main)
+        if self.ultima_captura_secondary is not None:
+            cv2.imwrite(os.path.join(f"{carpeta_destino}_cam2", nombre_archivo), self.ultima_captura_secondary)
 
     def run(self):
         while True:
-            ret, frame = self.cap.read()
-            if not ret:
-                print("⚠️ No se pudo capturar imagen.")
+            ret_main, frame_main = self.cap_main.read()
+            ret_sec, frame_sec = self.cap_secondary.read()
+
+            if not ret_main or not ret_sec:
+                print("⚠️ No se pudo capturar imagen desde ambas cámaras.")
                 break
 
-            recorte, offset = self.preprocess(frame)
+            self.ultima_captura_main = frame_main.copy()
+            self.ultima_captura_secondary = frame_sec.copy()
+
+            recorte, offset = self.preprocess(frame_main)
             x_off, y_off = offset
 
             contours, _ = self.extract_plate_contours(recorte)
@@ -126,36 +164,40 @@ class PlateDetector:
                     x1, y1 = x + x_off, y + y_off
                     x2, y2 = x1 + w, y1 + h
 
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
-                    placa_img = frame[y1:y2, x1:x2]
+                    cv2.rectangle(frame_main, (x1, y1), (x2, y2), (255, 255, 0), 2)
+                    placa_img = frame_main[y1:y2, x1:x2]
 
                     if placa_img.size > 0:
                         text = self.extract_text_from_plate(placa_img)
-                        if 6 <= len(text) <= 7:
+                        if len(text) == 6:
                             self.Ctexto = text
                             print("🚗 Placa detectada:", text)
-                            self.save_plate_and_log(text, placa_img)
+                            self.save_plate_and_log(text)
                         break
 
             # Mostrar texto
-            cv2.rectangle(frame, (870, 750), (1070, 850), (0, 0, 0), cv2.FILLED)
-            cv2.putText(frame, self.Ctexto, (880, 790), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+            cv2.rectangle(frame_main, (870, 750), (1070, 850), (0, 0, 0), cv2.FILLED)
+            cv2.putText(frame_main, self.Ctexto, (880, 790), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
             # Mostrar mensaje por 5 segundos
             if self.mensaje and (time.time() - self.tiempo_mensaje < 5):
-                cv2.rectangle(frame, (40, 20), (750, 60), (0, 0, 0), cv2.FILLED)
-                cv2.putText(frame, self.mensaje, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                cv2.rectangle(frame_main, (40, 20), (750, 60), (0, 0, 0), cv2.FILLED)
+                cv2.putText(frame_main, self.mensaje, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-            cv2.imshow("Vehiculos", frame)
+            cv2.imshow("Camara Principal", frame_main)
+            cv2.imshow("Camara Secundaria", frame_sec)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
-        self.cap.release()
+        self.cap_main.release()
+        self.cap_secondary.release()
         mydb.close()
         cv2.destroyAllWindows()
 
 # --- EJECUCIÓN PRINCIPAL ---
 if __name__ == "__main__":
-    detector = PlateDetector(cam_index=1)
+    cam1 = int(os.getenv("CAM_1", 1))
+    cam2 = int(os.getenv("CAM_2", 2))
+    detector = PlateDetector(cam_index_main = cam1, cam_index_secondary = cam2)
     detector.run()

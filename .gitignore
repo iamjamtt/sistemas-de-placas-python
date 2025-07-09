@@ -1,7 +1,6 @@
-
-.idea/misc.xml
-.idea/misc.xml
 *.xml
 placas_detectadas
 .env
 test.py
+.idea/misc.xml
+.idea/placas2.iml
