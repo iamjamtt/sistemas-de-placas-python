@@ -46,6 +46,7 @@ class PlateDetector:
         self.tiempo_mensaje = 0
         self.ultima_captura_main = None
         self.ultima_captura_secondary = None
+        self.placa_con_sancion = False
 
     def preprocess(self, frame):
         al, an, _ = frame.shape
@@ -78,14 +79,31 @@ class PlateDetector:
         return cleaned
 
     def save_plate_and_log(self, plate):
-        sql = "SELECT id FROM vehicles WHERE placa = %s"
+        sql = "SELECT id, tieneSancion, id_tipes_sanctions FROM vehicles WHERE placa = %s"
         mycursor.execute(sql, (plate,))
         result = mycursor.fetchone()
 
+        carpeta_base = 'files'
         carpeta_destino = "placas_no_detectadas_bd"
 
         if result:
             id_vehicle = result[0]
+            tieneSancion = result[1]
+            idSancion = result[2]
+            nombreSancion = ""
+            self.placa_con_sancion = False  # Valor por defecto
+
+            if tieneSancion == 1:
+                sqlSancion = "SELECT id, nombre FROM tipes_sanctions WHERE id = %s"
+                mycursor.execute(sqlSancion, (idSancion,))
+                resultSancion = mycursor.fetchone()
+
+                if resultSancion:
+                    nombreSancion = resultSancion[1]
+                    print(f"🚨 Vehículo con sanción: {nombreSancion}")
+
+                self.placa_con_sancion = True
+
             now = datetime.now()
             today = date.today().strftime('%Y-%m-%d')
             two_minutes_ago = now - timedelta(minutes=2)
@@ -131,14 +149,24 @@ class PlateDetector:
 
         self.tiempo_mensaje = time.time()
 
-        os.makedirs(carpeta_destino, exist_ok=True)
-        os.makedirs(f"{carpeta_destino}_cam2", exist_ok=True)
+        os.makedirs(carpeta_base, exist_ok=True)
+        ruta = os.path.join(carpeta_base, carpeta_destino)
+
+        # Rutas para ambas cámaras
+        ruta_cam1 = ruta
+        ruta_cam2 = f"{ruta}_cam2"
+
+        # Crear carpetas si no existen
+        os.makedirs(ruta_cam1, exist_ok=True)
+        os.makedirs(ruta_cam2, exist_ok=True)
+
+        # Guardar imágenes
         nombre_archivo = f"{plate}_{datetime.now().strftime('%H%M%S')}.png"
 
         if self.ultima_captura_main is not None:
-            cv2.imwrite(os.path.join(carpeta_destino, nombre_archivo), self.ultima_captura_main)
+            cv2.imwrite(os.path.join(ruta_cam1, nombre_archivo), self.ultima_captura_main)
         if self.ultima_captura_secondary is not None:
-            cv2.imwrite(os.path.join(f"{carpeta_destino}_cam2", nombre_archivo), self.ultima_captura_secondary)
+            cv2.imwrite(os.path.join(ruta_cam2, nombre_archivo), self.ultima_captura_secondary)
 
     def run(self):
         while True:
@@ -181,8 +209,10 @@ class PlateDetector:
 
             # Mostrar mensaje por 5 segundos
             if self.mensaje and (time.time() - self.tiempo_mensaje < 5):
-                cv2.rectangle(frame_main, (40, 20), (750, 60), (0, 0, 0), cv2.FILLED)
-                cv2.putText(frame_main, self.mensaje, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                color_mensaje = (0, 0, 255) if self.placa_con_sancion else (255, 255, 255)
+                cv2.rectangle(frame_main, (40, 20), (850, 60), (0, 0, 0), cv2.FILLED)
+                cv2.putText(frame_main, self.mensaje, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                            color_mensaje, 2)
 
             cv2.imshow("Camara Principal", frame_main)
             cv2.imshow("Camara Secundaria", frame_sec)
