@@ -149,8 +149,12 @@ class PlateDetector:
 
         self.tiempo_mensaje = time.time()
 
+        # Agrupar por fecha
+        fecha_str = datetime.now().strftime("%Y-%m-%d")
+
+        # Crear carpeta base si no existe
         os.makedirs(carpeta_base, exist_ok=True)
-        ruta = os.path.join(carpeta_base, carpeta_destino)
+        ruta = os.path.join(carpeta_base, carpeta_destino, fecha_str)
 
         # Rutas para ambas cámaras
         ruta_cam1 = ruta
