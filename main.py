@@ -79,12 +79,40 @@ class PlateDetector:
         return cleaned
 
     def save_plate_and_log(self, plate):
+        carpeta_base = 'files'
+        carpeta_destino = "placas_no_detectadas_bd"
+
+        # Agrupar por fecha
+        fecha_str = datetime.now().strftime("%Y-%m-%d")
+
+        # Crear carpeta base si no existe
+        os.makedirs(carpeta_base, exist_ok=True)
+        ruta = os.path.join(carpeta_base, carpeta_destino, fecha_str)
+
+        # Rutas para ambas cámaras
+        ruta_cam1 = ruta
+        ruta_cam2 = f"{ruta}_cam2"
+
+        # Crear carpetas si no existen
+        os.makedirs(ruta_cam1, exist_ok=True)
+        os.makedirs(ruta_cam2, exist_ok=True)
+
+        # Guardar imágenes
+        nombre_archivo = f"{plate}_{datetime.now().strftime('%H%M%S')}.png"
+
+        # Ruta bd
+        ruta_bd_cam1 = os.path.join(ruta_cam1, nombre_archivo)
+        ruta_bd_cam2 = os.path.join(ruta_cam2, nombre_archivo)
+
+        if self.ultima_captura_main is not None:
+            cv2.imwrite(ruta_bd_cam1, self.ultima_captura_main)
+        if self.ultima_captura_secondary is not None:
+            cv2.imwrite(ruta_bd_cam2, self.ultima_captura_secondary)
+
+        # Consultar base de datos
         sql = "SELECT id, tieneSancion, id_tipes_sanctions FROM vehicles WHERE placa = %s"
         mycursor.execute(sql, (plate,))
         result = mycursor.fetchone()
-
-        carpeta_base = 'files'
-        carpeta_destino = "placas_no_detectadas_bd"
 
         if result:
             id_vehicle = result[0]
@@ -119,8 +147,8 @@ class PlateDetector:
                     if ingreso_time and ingreso_time >= two_minutes_ago:
                         print("⚠️ Detección ignorada (repetido después de ingreso reciente).")
                         return
-                    sql_out = "UPDATE controls SET salida = %s, updated_at = %s WHERE id = %s"
-                    mycursor.execute(sql_out, (now, now, control_id))
+                    sql_out = "UPDATE controls SET salida = %s, updated_at = %s, foto_salida = %s, foto_salida_2 = %s WHERE id = %s"
+                    mycursor.execute(sql_out, (now, now, ruta_bd_cam1, ruta_bd_cam2, control_id))
                     mydb.commit()
                     print("⏺️ Salida registrada.")
                     self.mensaje = f"Placa {plate} registrada (salida)"
@@ -130,15 +158,15 @@ class PlateDetector:
                     if salida_time and salida_time >= two_minutes_ago:
                         print("⚠️ Detección ignorada (repetido después de salida reciente).")
                         return
-                    sql_in = "INSERT INTO controls (id_vehicle, ingreso, fecha, created_at, updated_at) VALUES (%s, %s, %s, %s, %s)"
-                    mycursor.execute(sql_in, (id_vehicle, now, today, now, now))
+                    sql_in = "INSERT INTO controls (id_vehicle, ingreso, fecha, foto_ingreso, foto_ingreso_2, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+                    mycursor.execute(sql_in, (id_vehicle, now, today, ruta_bd_cam1, ruta_bd_cam2,now, now))
                     mydb.commit()
                     print("✅ Ingreso registrado.")
                     self.mensaje = f"Placa {plate} registrada (ingreso)"
                     carpeta_destino = "placas_detectadas_ingreso"
             else:
-                sql_in = "INSERT INTO controls (id_vehicle, ingreso, fecha, created_at, updated_at) VALUES (%s, %s, %s, %s, %s)"
-                mycursor.execute(sql_in, (id_vehicle, now, today, now, now))
+                sql_in = "INSERT INTO controls (id_vehicle, ingreso, fecha, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+                mycursor.execute(sql_in, (id_vehicle, now, today, ruta_bd_cam1, ruta_bd_cam2,now, now))
                 mydb.commit()
                 print("✅ Ingreso registrado.")
                 self.mensaje = f"Placa {plate} registrada (ingreso)"
@@ -148,29 +176,6 @@ class PlateDetector:
             self.mensaje = f"Placa {plate} no registrada"
 
         self.tiempo_mensaje = time.time()
-
-        # Agrupar por fecha
-        fecha_str = datetime.now().strftime("%Y-%m-%d")
-
-        # Crear carpeta base si no existe
-        os.makedirs(carpeta_base, exist_ok=True)
-        ruta = os.path.join(carpeta_base, carpeta_destino, fecha_str)
-
-        # Rutas para ambas cámaras
-        ruta_cam1 = ruta
-        ruta_cam2 = f"{ruta}_cam2"
-
-        # Crear carpetas si no existen
-        os.makedirs(ruta_cam1, exist_ok=True)
-        os.makedirs(ruta_cam2, exist_ok=True)
-
-        # Guardar imágenes
-        nombre_archivo = f"{plate}_{datetime.now().strftime('%H%M%S')}.png"
-
-        if self.ultima_captura_main is not None:
-            cv2.imwrite(os.path.join(ruta_cam1, nombre_archivo), self.ultima_captura_main)
-        if self.ultima_captura_secondary is not None:
-            cv2.imwrite(os.path.join(ruta_cam2, nombre_archivo), self.ultima_captura_secondary)
 
     def run(self):
         while True:
